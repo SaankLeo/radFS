@@ -1,16 +1,35 @@
+alias b := build
+alias r := run
+alias c := check
+
+bin_name := "bin/radFS"
+
+# Shows this help menu
+default:
+    @echo "Usage: just <recipe> [arguments...]"
+    @echo ""
+    @just --list
+
 # Build the Go binary in bin
 build:
     mkdir -p bin
-    go build -o bin/radFS ./cmd/radFS
+    go build -o {{bin_name}} ./cmd/radFS
 
 # Run the filesystem (Usage: just run <folder_name>)
-run mnt:
+run mnt dbg="":
+    #!/usr/bin/env bash
     mkdir -p {{mnt}}
-    go run ./cmd/radFS {{mnt}}
+
+    if [[ -f {{bin_name}} ]]; then
+        ./{{bin_name}} {{dbg}} {{mnt}}
+    else
+        go run ./cmd/radFS {{dbg}} {{mnt}}
+    fi
 
 # Clean up bin
 clean:
     rm -rf bin
+    go clean
 
 # Force unmount if the app crashes (Very helpful for FUSE)
 unmount mnt:
@@ -20,3 +39,4 @@ unmount mnt:
 check:
     go fmt ./...
     go vet ./...
+    go mod tidy
