@@ -167,10 +167,17 @@ func (d *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Nod
 		return syscall.ENOENT
 	}
 
-	//destination exists so error
-	if _, exists := newParent.Nodes[req.NewName]; exists {
-		return syscall.EEXIST
-	}
+	
+	// if destination exists → overwrite 
+if existing, exists := newParent.Nodes[req.NewName]; exists {
+    // if it's a directory, check if empty
+    if dir, ok := existing.(*Dir); ok {
+        if len(dir.Nodes) > 0 {
+            return syscall.ENOTEMPTY
+        }
+    }
+    delete(newParent.Nodes, req.NewName)
+}
 
 	//removes from old
 	delete(d.Nodes, req.OldName)
@@ -180,3 +187,4 @@ func (d *Dir) Rename(ctx context.Context, req *fuse.RenameRequest, newDir fs.Nod
 
 	return nil
 }
+
