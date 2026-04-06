@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"syscall"
+	"time"
 
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
@@ -20,8 +21,34 @@ func (f *FS) DebugPrint(msg string, v ...any) {
 func (d *Dir) Attr(ctx context.Context, a *fuse.Attr) error {
 	a.Inode = d.inode
 	a.Mode = os.ModeDir | 0o755
+	a.Atime = d.atime
+	a.Mtime = d.mtime
+	a.Ctime = d.ctime
 
 	return nil
+}
+
+func (d *Dir) Setattr(ctx context.Context, req *fuse.SetattrRequest, resp *fuse.SetattrResponse) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if req.Valid.Atime() {
+		d.atime = req.Atime
+	}
+	if req.Valid.Mtime() {
+		d.mtime = req.Mtime
+	}
+	d.ctime = time.Now()
+
+	resp.Attr.Inode = d.inode
+	resp.Attr.Mode = os.ModeDir | 0o755
+
+	resp.Attr.Atime = d.atime
+	resp.Attr.Mtime = d.mtime
+	resp.Attr.Ctime = d.ctime
+
+	return nil
+
 }
 
 func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
@@ -35,6 +62,8 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fs.Node, error) {
 	if !ok {
 		return nil, syscall.ENOENT
 	}
+
+	d.atime = time.Now()
 
 	return node, nil
 }
@@ -59,6 +88,8 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 		entries = append(entries, fuse.Dirent{Name: name, Type: dt})
 	}
 
+	d.atime = time.Now()
+
 	return entries, nil
 }
 
@@ -79,8 +110,18 @@ func (d *Dir) Mkdir(ctx context.Context, req *fuse.MkdirRequest) (fs.Node, error
 		return nil, syscall.EEXIST
 	}
 
-	newDir := &Dir{inode: nextInode(), Nodes: make(map[string]fs.Node), fs: d.fs}
+	newDir := &Dir{
+		inode: nextInode(),
+		Nodes: make(map[string]fs.Node),
+		fs:    d.fs,
+		atime: time.Now(),
+		ctime: time.Now(),
+		mtime: time.Now(),
+	}
 	d.Nodes[req.Name] = newDir
+
+	d.mtime = time.Now()
+	d.ctime = time.Now()
 
 	return newDir, nil
 }
@@ -99,8 +140,22 @@ func (d *Dir) Create(ctx context.Context, req *fuse.CreateRequest, resp *fuse.Cr
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	f := &File{inode: nextInode(), data: []byte{}, mode: uint32(req.Mode)}
+	f := &File{
+		inode: nextInode(),
+		data:  []byte{},
+		mode:  uint32(req.Mode),
+		atime: time.Now(),
+		ctime: time.Now(),
+		mtime: time.Now(),
+	}
+
+	if _, exists := d.Nodes[req.Name]; exists { // checking for dupes
+		return nil, nil, syscall.EEXIST
+	}
 	d.Nodes[req.Name] = f
+
+	d.mtime = time.Now()
+	d.ctime = time.Now()
 
 	return f, f, nil
 }
@@ -127,9 +182,11 @@ func (d *Dir) Remove(ctx context.Context, req *fuse.RemoveRequest) error {
 			return syscall.ENOTEMPTY
 		}
 	}
-	
 
 	delete(d.Nodes, req.Name)
+
+	d.mtime = time.Now()
+	d.ctime = time.Now()
 
 	return nil
 }
